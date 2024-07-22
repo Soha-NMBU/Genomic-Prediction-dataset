@@ -1,0 +1,123 @@
+#install pls package (if not already installed)
+#install.packages("pls")
+#load pls package
+rm(list = ls())
+library(pls)
+library(SKM)
+library(BGLR)
+#make this example reproducible
+set.seed(1)
+Summary_All=data.frame()
+Summary_All=data.frame()
+
+data <- load("Norway_data_2022.RData", verbose = TRUE)
+ls()
+Data_names=list("EC1","EC2","EC3","EC4","EC5","EC6")
+Data_names[1]
+for(w in 1:6){
+#w=1
+name <-Data_names[w]
+
+Pheno=Pheno
+head(Pheno)
+Gids=sort(Markers1$Line)
+Gids
+Markers_Raw=Markers1[Gids,]
+Markers=Markers_Raw[,-1]
+Pos_var=which(apply(Markers,2,var)>0)
+#length(Pos_var)
+Markers_Scaled=scale(Markers[,Pos_var])
+
+Geno=Markers_Scaled%*%t(Markers_Scaled)/ncol(Markers_Scaled)
+
+Pheno = Pheno[order(Pheno$Env, Pheno$Line),] #ordenar pheno por environment
+rownames(Pheno) =1:nrow(Pheno)
+#head(Pheno)
+dim(Pheno)
+dim(Geno)
+
+# Data preparation
+Line <- model.matrix(~0 + as.factor(Line), data = Pheno)
+dim(Line)
+X_Env <- model.matrix(~0 + Env, data = Pheno)
+dim(X_Env)
+colnames(X_Env)
+#####Environmenal covariates
+EC<-EC_ls[[w]]
+head(EC[,1:6])
+EC_Ord= EC[order(EC$Env, EC$Line),]
+EC=as.matrix(EC_Ord[,-c(1:2)])
+head(EC[,1:6])
+dim(EC)
+EC_Scaled=scale(EC)
+X_Env=X_Env
+dim(X_Env)
+K.E=X_Env%*%t(X_Env)/ncol(X_Env)
+Geno1=Geno
+diag(Geno1)=diag(Geno1)+0.001
+L_G <- t(chol(Geno1))
+X_Line<- Line%*%L_G
+Geno11=as.matrix(Geno1)
+K.L=Line%*%Geno11%*%t(Line)
+K.LE=K.L*K.E
+X_LE=t(chol(K.LE))
+X=cbind(X_Env,X_Line,X_LE,EC_Scaled)
+head(Pheno)
+Trait_names=colnames(Pheno)[4:ncol(Pheno)]
+Trait_names
+All_summary=data.frame()
+
+for (t in 1:2){
+  #t=4
+  Trait_t=Trait_names[t]
+  y<- Pheno[, 3+t]
+  y[4]=NA
+  pos_Na=which(is.na(y)==TRUE)
+  pos_Na
+  if (length(pos_Na)>0) {
+    y[ pos_Na]=median(y)
+  } else {
+    y=y
+  }
+
+    Envs=unique(Pheno$Env)
+  Predictions <- data.frame()
+  for (e in 1:length(Envs)){
+    cat("*** Fold:", e, " ***\n")
+    #  e=1
+    tst_e=Envs[e]
+    pos_test_e=which(Pheno$Env==tst_e)
+    # pos_test_e
+    X_training <- X[-pos_test_e, ]
+    X_testing <- X[ pos_test_e, ]
+    y_training <- y[-pos_test_e]
+    y_testing <- y[pos_test_e]
+    
+    model <- plsr(y_training~X_training, scale=F, validation="CV")
+    #  str(model)  
+    # summary(model)
+    ncomp.onesigma <- selectNcomp(model, method = "onesigma", plot = TRUE,ylim = c(.18, .6))
+    #  validationplot(model, val.type="MSEP")
+    #  validationplot(model, val.type="R2")
+    #    summary(model, what = "validation")
+    ######Fit the model with the optimal number of principal components
+    model_Final <- plsr(y_training~X_training, scale=F, validation="none")
+    #validationplot(model_Final, val.type="MSEP")
+    #str(model_Final)
+    #summary(model_Final, what = "validation")
+    Y_predicted <- predict(model_Final, X_testing, ncomp=(ncomp.onesigma+1))
+    #plot(y_testing,Y_predicted)
+    #cor(y_testing,Y_predicted)
+    Predictions_e=data.frame(Line=Pheno$Line[pos_test_e], Fold=e, Env=Pheno$Env[pos_test_e], Observed=y_testing,Predicted=c(Y_predicted))
+    Predictions=rbind(Predictions,Predictions_e)
+  }
+  Predictions
+  Pred_Env_Summary=gs_summaries(Predictions)$env
+  Pred_Env_Summary
+  All_summary=rbind(All_summary,data.frame(Trait_t=Trait_t, Pred_Env_Summary))
+}
+
+Saving_name=paste(name, "Pred_PLS_CVO_Traits_E+G+GE.csv", sep="_")
+write.csv(All_summary,file=Saving_name[1])
+}
+
